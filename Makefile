@@ -1,6 +1,6 @@
 BIN := prog
-SRC := main.c
-LFLAGS := -lm -lportaudio
+SRC := main.c convolution.c
+LFLAGS := -lfftw3
 
 SRCDIR := src
 BUILDDIR := build
