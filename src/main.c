@@ -1,6 +1,8 @@
-#include <stdio.h>
-#include <fftw3.h>
 #include "convolution.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <fftw3.h>
 
 void print_signal(double* signal, int size) {
     printf("{ %lf", signal[0]);
@@ -19,15 +21,25 @@ void print_spectrum(fftw_complex* signal, int size) {
 }
 
 #define IMPULSE_SIZE 3
-#define SIGNAL_SIZE 9
+#define SIGNAL_SIZE 8
 
 int main() {
-    // double signal[SIGNAL_SIZE] = {8,6,-3,4,1,-6,7,9,-1};
+    double signal[SIGNAL_SIZE] = {8,6,-3,4,1,-6,7,9};
     double impulse_response[IMPULSE_SIZE] = {1,5,4};
 
     Convolutor* conv = conv_init(SIGNAL_SIZE, IMPULSE_SIZE, impulse_response);
 
-    print_spectrum(conv->out_freq_buffer, conv->window_size / 2 + 1);
+    memcpy(conv->input, signal, SIGNAL_SIZE * sizeof(double));
+
+    printf("Input: ");
+    print_signal(conv->input, conv->input_size);
+    printf("\nImpulse response: ");
+    print_signal(conv->impulse_resp, conv->impulse_resp_size);
+
+    conv_convolve(conv);
+
+    printf("\nConvolution: ");
+    print_signal(conv->output, conv->output_size);
 
     conv_terminate(conv);
 
