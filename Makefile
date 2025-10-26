@@ -1,11 +1,11 @@
 BIN := prog
-SRC := main.c convolution.c
-LFLAGS := -lfftw3
+SRC := main.c convolution.c audio.c
+LFLAGS := -lfftw3 -lportaudio -lm
 
 SRCDIR := src
 BUILDDIR := build
 
-CFLAGS := -g -Wall -Werror -fsanitize=address
+CFLAGS := -g -Wall -Werror
 
 SRCFILES := $(addprefix $(SRCDIR)/, $(SRC))
 
