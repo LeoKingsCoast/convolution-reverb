@@ -1,7 +1,7 @@
 #include <portaudio.h>
 #include <stdio.h>
 
-PaStream* portaudio_init(int sample_rate, PaSampleFormat sample_type, int frames_per_buffer, PaStreamCallback callback) {
+PaStream* portaudio_init(int sample_rate, PaSampleFormat sample_type, int frames_per_buffer, PaStreamCallback callback, void* user_data) {
     if (sample_rate < 0 || frames_per_buffer < 0) {
         fprintf(stderr, "[Error]: Sample Rate and Frames per Buffer must be positive\n");
         return NULL;
@@ -38,7 +38,7 @@ PaStream* portaudio_init(int sample_rate, PaSampleFormat sample_type, int frames
     PaStream* stream;
     err = Pa_OpenStream(
         &stream, &in_params, &out_params, sample_rate, frames_per_buffer, 0,
-        callback, NULL
+        callback, user_data
     );
 
     if (err != paNoError) {

@@ -1,34 +1,34 @@
 #include <fftw3.h>
 
 typedef struct convolutor {
-    double* impulse_resp; // Impuse response time signal
-    fftw_complex* impulse_freq_padded; // Impuse response frequency signal, of the time signal padded to the window size
+    float* impulse_resp; // Impuse response time signal
+    fftwf_complex* impulse_freq_padded; // Impuse response frequency signal, of the time signal padded to the window size
     int impulse_resp_size;
 
-    double* input; // Input time signal
+    float* input; // Input time signal
     int input_size; // Input frequency signal
 
-    double* output; // Output time signal
+    float* output; // Output time signal
     int output_size; // Output frequency signal
 
     // --- Auxiliary variables ----
-    double* window;
-    fftw_complex* window_freq;
+    float* window;
+    fftwf_complex* window_freq;
     int window_size;
 
-    double* out_block;
-    double* out_block_freq;
+    float* out_block;
+    float* out_block_freq;
 
-    double* overlap;
+    float* overlap;
     int overlap_size;
 
-    double* in_time_buffer;
-    fftw_complex* in_freq_buffer;
-    double* out_time_buffer;
-    fftw_complex* out_freq_buffer;
+    float* in_time_buffer;
+    fftwf_complex* in_freq_buffer;
+    float* out_time_buffer;
+    fftwf_complex* out_freq_buffer;
 
-    fftw_plan fft_plan;
-    fftw_plan ifft_plan;
+    fftwf_plan fft_plan;
+    fftwf_plan ifft_plan;
 } Convolutor;
 
 /**
@@ -36,7 +36,7 @@ typedef struct convolutor {
  * real impulse response time signal. The input should be filled before doing 
  * operations with the Convolutor. Returns null on failure.
  */
-Convolutor* conv_init(int input_size, int impulse_resp_size, double* impulse_resp);
+Convolutor* conv_init(int input_size, int impulse_resp_size, float* impulse_resp);
 
 /**
  * @brief Calculates the convolution between the input and imppulse_resp buffers
