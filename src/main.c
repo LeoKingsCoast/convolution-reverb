@@ -2,12 +2,13 @@
 #include "audio.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <fftw3.h>
 #include <portaudio.h>
 
-#define IMPULSE_RESP_SIZE 128
+#define IMPULSE_RESP_SIZE 256
 #define FRAMES_PER_BUFFER 512
 #define SAMPLE_RATE 44100
 
@@ -27,27 +28,42 @@ void print_spectrum(fftwf_complex* signal, int size) {
     printf("\n}");
 }
 
+typedef struct user_data {
+    ConvolutorCircular* convolutor;
+    float* overlap_buffer;
+    int impulse_resp_size;
+} UserData;
+
 static int callback(
     const void *in_buffer, void *out_buffer, unsigned long frames_per_buffer,
     const PaStreamCallbackTimeInfo* time_info, PaStreamCallbackFlags status_flags,
-    void *convolutor
+    void *user_data
 )
 {
     const float* in = (const float*) in_buffer;
     float* out = (float*) out_buffer;
-    Convolutor* conv = (Convolutor*) convolutor;
+    UserData* params = (UserData*) user_data;
+
+    ConvolutorCircular* conv = params->convolutor;
+    float* overlap_buffer = params->overlap_buffer;
+    int impulse_resp_size = params->impulse_resp_size;
 
     if (!in || !out)
         return paContinue;
 
-    memcpy(conv->input, in, frames_per_buffer * sizeof(float));
+    memcpy(conv->input, overlap_buffer, (impulse_resp_size - 1) * sizeof(float));
+    memcpy(conv->input + (impulse_resp_size - 1), in, frames_per_buffer * sizeof(float));
 
-    conv_convolve(conv);
+    conv_circular(conv);
 
     for (int i = 0; i < frames_per_buffer; i++) {
-        float sample = conv->output[i];
+        float sample = conv->output[impulse_resp_size - 1 + i];
         *out++ = sample; // left side
         *out++ = sample; // right side
+    }
+
+    for (int i = 0; i < impulse_resp_size - 1; i++) {
+        overlap_buffer[i] = in[frames_per_buffer - impulse_resp_size + i];
     }
 
     return paContinue;
@@ -55,15 +71,21 @@ static int callback(
 
 int main() {
     float impulse_resp[IMPULSE_RESP_SIZE];
+
+    float decay_time = 5.0;    // seconds until ~-60dB (approx)
+
     for (int i = 0; i < IMPULSE_RESP_SIZE; i++) {
-        impulse_resp[i] = 0.5 * exp(-1.0 * i / IMPULSE_RESP_SIZE);
+        float t = i / (float) SAMPLE_RATE;
+        impulse_resp[i] = 0.08 * exp(-t / decay_time);
     }
 
-    Convolutor* conv = conv_init(FRAMES_PER_BUFFER, IMPULSE_RESP_SIZE, impulse_resp);
+    UserData user_data = {
+        .convolutor = conv_init_circular(FRAMES_PER_BUFFER + IMPULSE_RESP_SIZE - 1, IMPULSE_RESP_SIZE, impulse_resp),
+        .overlap_buffer = calloc((IMPULSE_RESP_SIZE - 1), sizeof(float)),
+        .impulse_resp_size = IMPULSE_RESP_SIZE,
+    };
 
-    print_spectrum(conv->impulse_freq_padded, (conv->window_size / 2 + 1));
-
-    PaStream* stream = portaudio_init(SAMPLE_RATE, paFloat32, FRAMES_PER_BUFFER, callback, conv);
+    PaStream* stream = portaudio_init( SAMPLE_RATE, paFloat32, FRAMES_PER_BUFFER, callback, &user_data);
     if (!stream) {
         return -1;
     }
@@ -77,7 +99,8 @@ int main() {
     printf("Press Enter to stop the stream\n");
     getchar();
 
-    conv_terminate(conv);
+    free(user_data.overlap_buffer);
+    conv_terminate_circular(user_data.convolutor);
 
     Pa_CloseStream(stream);
     if (err != paNoError) {
