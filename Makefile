@@ -1,6 +1,6 @@
 BIN := conv-rev
 SRC := main.c convolution.c audio.c
-LFLAGS := -lfftw3f -lportaudio -lm
+LDLIBS := -lfftw3f -lportaudio -lm
 
 SRCDIR := src
 BUILDDIR := build
@@ -16,7 +16,7 @@ all: $(BUILDDIR)/$(BIN)
 
 $(BUILDDIR)/$(BIN): $(SRCFILES)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LFLAGS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 install_deps: install_fftw install_portaudio
 .PHONY := install_deps
