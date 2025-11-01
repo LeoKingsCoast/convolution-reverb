@@ -1,4 +1,4 @@
-BIN := prog
+BIN := conv-rev
 SRC := main.c convolution.c audio.c
 LFLAGS := -lfftw3f -lportaudio -lm
 
