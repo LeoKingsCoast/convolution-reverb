@@ -8,8 +8,8 @@
 #include <fftw3.h>
 #include <portaudio.h>
 
-#define IMPULSE_RESP_SIZE 256
-#define FRAMES_PER_BUFFER 512
+#define IMPULSE_RESP_SIZE 1024
+#define FRAMES_PER_BUFFER 1024
 #define SAMPLE_RATE 44100
 
 void print_signal(float* signal, int size) {
@@ -72,11 +72,12 @@ static int callback(
 int main() {
     float impulse_resp[IMPULSE_RESP_SIZE];
 
-    float decay_time = 5.0;    // seconds until ~-60dB (approx)
+    float decay_time = 0.02;    // seconds until ~-60dB (approx)
+    float tau = decay_time / logf(1000.0f);
 
     for (int i = 0; i < IMPULSE_RESP_SIZE; i++) {
         float t = i / (float) SAMPLE_RATE;
-        impulse_resp[i] = 0.08 * exp(-t / decay_time);
+        impulse_resp[i] = 0.05 * expf(-t / tau);
     }
 
     UserData user_data = {

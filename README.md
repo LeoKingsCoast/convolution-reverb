@@ -10,7 +10,7 @@ response.
 ## Dependencies
 
 - [Portaudio](https://www.portaudio.com/)
-- [FFTW](https://www.fftw.org/).
+- [FFTW](https://www.fftw.org/)
 
 ## Build and Run
 
