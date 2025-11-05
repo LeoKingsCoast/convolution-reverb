@@ -1,6 +1,6 @@
 BIN := conv-rev
 SRC := main.c convolution.c audio.c
-LDLIBS := -lfftw3f -lportaudio -lm
+LDLIBS := -lfftw3f -lportaudio -lm -lrt -lasound -pthread
 
 SRCDIR := src
 BUILDDIR := build
@@ -17,6 +17,7 @@ all: $(BUILDDIR)/$(BIN)
 $(BUILDDIR)/$(BIN): $(SRCFILES)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	sudo setcap cap_ipc_lock=+ep $@
 
 install_deps: install_fftw install_portaudio
 .PHONY := install_deps

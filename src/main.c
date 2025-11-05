@@ -3,10 +3,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <math.h>
 #include <fftw3.h>
 #include <portaudio.h>
+
+#include <sys/mman.h>
+#include <pa_linux_alsa.h>
 
 #define IMPULSE_RESP_SIZE 1024
 #define FRAMES_PER_BUFFER 1024
@@ -70,6 +74,11 @@ static int callback(
 }
 
 int main() {
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
+        perror("Failed to lock memory");
+        return -1;
+    }
+
     float impulse_resp[IMPULSE_RESP_SIZE];
 
     float decay_time = 0.02;    // seconds until ~-60dB (approx)
@@ -90,6 +99,8 @@ int main() {
     if (!stream) {
         return -1;
     }
+
+    PaAlsa_EnableRealtimeScheduling(stream, true);
 
     PaError err = Pa_StartStream(stream);
     if (err != paNoError) {

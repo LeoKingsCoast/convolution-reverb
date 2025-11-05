@@ -22,7 +22,9 @@ To build and run the application, follow the steps below:
     make install_deps
     ```
 
-1. Build the application:
+1. Build the application. Note: Building the application will require root
+access. This is necessary to give the binary the `CAP_IPC_LOCK` capability,
+required for it to lock memory pages for real-time safety.
 
     ```bash
     make
