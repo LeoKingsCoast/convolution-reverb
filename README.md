@@ -27,7 +27,7 @@ access. This is necessary to give the binary the `CAP_IPC_LOCK` capability,
 required for it to lock memory pages for real-time safety.
 
     ```bash
-    make
+    sudo make
     ```
 
 1. Run the application. You should be able to hear the audio of your machine's 

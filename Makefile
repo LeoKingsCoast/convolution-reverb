@@ -17,7 +17,7 @@ all: $(BUILDDIR)/$(BIN)
 $(BUILDDIR)/$(BIN): $(SRCFILES)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
-	sudo setcap cap_ipc_lock=+ep $@
+	setcap cap_ipc_lock=+ep $@
 
 install_deps: install_fftw install_portaudio
 .PHONY := install_deps
