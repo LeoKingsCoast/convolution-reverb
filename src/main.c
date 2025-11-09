@@ -93,6 +93,15 @@ void* wav_write_routine(void* in_args) {
     return NULL;
 }
 
+void fill_impulse_response_reverb(float *ir, int ir_len, float decay_ms, float sample_rate) {
+    // To decay by -60dB (10^-3), we need tau = decay_time / ln(10^-3) => tau ~ decay_time / 6.91
+    float tau = decay_ms / 1000.0f / 6.91f;
+    for (int i = 0; i < ir_len; i++) {
+        float t = i / sample_rate;
+        ir[i] = expf(-t / tau);
+    }
+}
+
 int main() {
     // ================= LOCK MEMORY ==================
 
@@ -106,13 +115,7 @@ int main() {
 
     float impulse_resp[IMPULSE_RESP_SIZE];
 
-    float decay_time = 0.02;    // seconds until ~-60dB (approx)
-    float tau = decay_time / logf(1000.0f);
-
-    for (int i = 0; i < IMPULSE_RESP_SIZE; i++) {
-        float t = i / (float) SAMPLE_RATE;
-        impulse_resp[i] = 0.05 * expf(-t / tau);
-    }
+    fill_impulse_response_reverb(impulse_resp, IMPULSE_RESP_SIZE, 20.0, SAMPLE_RATE);
 
     // =========== CREATE FILE WRITE THREAD ===========
 
