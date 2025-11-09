@@ -16,22 +16,6 @@
 #define FRAMES_PER_BUFFER 1024
 #define SAMPLE_RATE 44100
 
-void print_signal(float* signal, int size) {
-    printf("{ %lf", signal[0]);
-    for (int i = 1; i < size; i++) {
-        printf(", %lf", signal[i]);
-    }
-    printf(" }");
-}
-
-void print_spectrum(fftwf_complex* signal, int size) {
-    printf("{\n %lf + i(%lf)", signal[0][0], signal[0][1]);
-    for (int i = 1; i < size; i++) {
-        printf("\n %lf + i(%lf)", signal[i][0], signal[i][1]);
-    }
-    printf("\n}");
-}
-
 typedef struct user_data {
     ConvolutorCircular* convolutor;
     float* overlap_buffer;

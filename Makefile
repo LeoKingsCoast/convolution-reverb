@@ -1,5 +1,5 @@
 BIN := conv-rev
-SRC := main.c convolution.c audio.c
+SRC := main.c convolution.c audio.c ringbuffer.c
 LDLIBS := -lfftw3f -lportaudio -lm -lrt -lasound -pthread
 
 SRCDIR := src
