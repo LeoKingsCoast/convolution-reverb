@@ -22,12 +22,13 @@ To build and run the application, follow the steps below:
     make install_deps
     ```
 
-1. Build the application. Note: Building the application will require root
-access. This is necessary to give the binary the `CAP_IPC_LOCK` capability,
-required for it to lock memory pages for real-time safety.
+1. Build the application. After building you will need to give the binary the 
+`CAP_IPC_LOCK` capability, required for it to lock memory pages for real-time 
+safety.
 
     ```bash
-    sudo make
+    make
+    sudo setcap cap_ipc_lock=+ep build/conv-rev
     ```
 
 1. Run the application. You should be able to hear the audio of your machine's 
