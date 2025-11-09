@@ -6,6 +6,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
+#include <unistd.h>
+
 #include <fftw3.h>
 #include <portaudio.h>
 
@@ -57,11 +60,28 @@ static int callback(
     return paContinue;
 }
 
+void* wav_write_routine(void* stop_flag) {
+    bool* stop = (bool*) stop_flag;
+    while (*stop == false) {
+        printf("I AM WRITING\n");
+        sleep(1);
+    }
+
+    printf("Stop request detected\n");
+
+    return NULL;
+}
+
 int main() {
+    // ================= LOCK MEMORY ==================
+
     if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
         perror("Failed to lock memory");
         return -1;
     }
+
+
+    // =========== CREATE IMPULSE RESPONSE ============
 
     float impulse_resp[IMPULSE_RESP_SIZE];
 
@@ -72,6 +92,17 @@ int main() {
         float t = i / (float) SAMPLE_RATE;
         impulse_resp[i] = 0.05 * expf(-t / tau);
     }
+
+    // =========== CREATE FILE WRITE THREAD ===========
+
+    pthread_t writing_thread;
+    bool writing_stop_flag = false;
+    if(pthread_create(&writing_thread, NULL, wav_write_routine, &writing_stop_flag)) {
+        perror("Could not create thread for writing WAV file");
+        return -1;
+    }
+
+    // ================ START STREAM ==================
 
     UserData user_data = {
         .convolutor = conv_init_circular(FRAMES_PER_BUFFER + IMPULSE_RESP_SIZE - 1, IMPULSE_RESP_SIZE, impulse_resp),
@@ -94,6 +125,11 @@ int main() {
 
     printf("Press Enter to stop the stream\n");
     getchar();
+
+    writing_stop_flag = true;
+    pthread_join(writing_thread, NULL);
+
+    printf("Closing file...\n");
 
     free(user_data.overlap_buffer);
     conv_terminate_circular(user_data.convolutor);
