@@ -1,5 +1,6 @@
 #include "convolution.h"
 #include "audio.h"
+#include "ringbuffer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,8 @@
 #include <fftw3.h>
 #include <portaudio.h>
 
+#include <sndfile.h>
+
 #include <sys/mman.h>
 #include <pa_linux_alsa.h>
 
@@ -23,6 +26,7 @@ typedef struct user_data {
     ConvolutorCircular* convolutor;
     float* overlap_buffer;
     int impulse_resp_size;
+    RingBuffer* ring_buffer;
 } UserData;
 
 static int callback(
@@ -36,6 +40,7 @@ static int callback(
     UserData* params = (UserData*) user_data;
 
     ConvolutorCircular* conv = params->convolutor;
+    RingBuffer* ring_buffer = params->ring_buffer;
     float* overlap_buffer = params->overlap_buffer;
     int impulse_resp_size = params->impulse_resp_size;
 
@@ -49,6 +54,7 @@ static int callback(
 
     for (int i = 0; i < frames_per_buffer; i++) {
         float sample = conv->output[impulse_resp_size - 1 + i];
+        ring_buffer_push(ring_buffer, sample);
         *out++ = sample; // left side
         *out++ = sample; // right side
     }
@@ -60,12 +66,27 @@ static int callback(
     return paContinue;
 }
 
-void* wav_write_routine(void* stop_flag) {
-    bool* stop = (bool*) stop_flag;
+typedef struct {
+    bool* stop_flag;
+    SNDFILE* outfile;
+    RingBuffer* buffer;
+} WritingThreadArgs;
+
+void* wav_write_routine(void* in_args) {
+    WritingThreadArgs* args = (WritingThreadArgs*) in_args;
+    bool* stop = args->stop_flag;
+    SNDFILE* outfile = args->outfile;
+    RingBuffer* buffer = args->buffer;
+
+    float sample = 0.0f;
     while (*stop == false) {
-        printf("I AM WRITING\n");
-        sleep(1);
+        if (ring_buffer_pop(buffer, &sample) < 0) // Ring buffer empty
+            continue;
+        if (sf_write_float (outfile, &sample, 1) != 1)
+            puts (sf_strerror (outfile));
     }
+
+    free(buffer);
 
     printf("Stop request detected\n");
 
@@ -95,10 +116,30 @@ int main() {
 
     // =========== CREATE FILE WRITE THREAD ===========
 
-    pthread_t writing_thread;
+    SF_INFO sfinfo = {};
+    sfinfo.samplerate = SAMPLE_RATE;
+    sfinfo.channels = 1;
+    sfinfo.format = (SF_FORMAT_WAV | SF_FORMAT_FLOAT);
+
+    SNDFILE* outfile = sf_open("out.wav", SFM_WRITE, &sfinfo);
+    if (!outfile) {
+        fprintf(stderr, "[Error]: Unable to open WAV file for writing.\n");
+        return -1;
+    }
+
+    RingBuffer* ring_buffer = ring_buffer_init(2048);
+
     bool writing_stop_flag = false;
-    if(pthread_create(&writing_thread, NULL, wav_write_routine, &writing_stop_flag)) {
+    WritingThreadArgs writing_thread_args = {
+        .stop_flag = &writing_stop_flag,
+        .outfile = outfile,
+        .buffer = ring_buffer,
+    };
+
+    pthread_t writing_thread;
+    if(pthread_create(&writing_thread, NULL, wav_write_routine, &writing_thread_args)) {
         perror("Could not create thread for writing WAV file");
+        sf_close(outfile);
         return -1;
     }
 
@@ -108,6 +149,7 @@ int main() {
         .convolutor = conv_init_circular(FRAMES_PER_BUFFER + IMPULSE_RESP_SIZE - 1, IMPULSE_RESP_SIZE, impulse_resp),
         .overlap_buffer = calloc((IMPULSE_RESP_SIZE - 1), sizeof(float)),
         .impulse_resp_size = IMPULSE_RESP_SIZE,
+        .ring_buffer = ring_buffer,
     };
 
     PaStream* stream = portaudio_init( SAMPLE_RATE, paFloat32, FRAMES_PER_BUFFER, callback, &user_data);
@@ -130,6 +172,7 @@ int main() {
     pthread_join(writing_thread, NULL);
 
     printf("Closing file...\n");
+    sf_close(outfile);
 
     free(user_data.overlap_buffer);
     conv_terminate_circular(user_data.convolutor);
