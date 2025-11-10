@@ -96,9 +96,17 @@ void* wav_write_routine(void* in_args) {
 void fill_impulse_response_reverb(float *ir, int ir_len, float decay_ms, float sample_rate) {
     // To decay by -60dB (10^-3), we need tau = decay_time / ln(10^-3) => tau ~ decay_time / 6.91
     float tau = decay_ms / 1000.0f / 6.91f;
+    float sum = 0.0f;
     for (int i = 0; i < ir_len; i++) {
         float t = i / sample_rate;
         ir[i] = expf(-t / tau);
+        sum += fabsf(ir[i]);
+    }
+
+    // Normalize impulse response to not increase output amplitude on convolution
+    if (sum > 0.0f) {
+        for (int i = 0; i < ir_len; i++)
+            ir[i] /= sum;
     }
 }
 
