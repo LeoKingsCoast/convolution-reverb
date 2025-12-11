@@ -16,6 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void complex_multiply(fftwf_complex result, const fftwf_complex a, const fftwf_complex b) {
+        result[0] = a[0] * b[0] - a[1] * b[1];
+        result[1] = a[0] * b[1] + a[1] * b[0];
+}
+
 Convolutor* conv_init_linear(int input_size, int impulse_resp_size, float* impulse_resp) {
     if (input_size <= 0 || impulse_resp_size <= 0 || impulse_resp == NULL)
         return NULL;
@@ -236,5 +241,136 @@ void conv_circular(ConvolutorCircular* c) {
 
     for (int i = 0; i < c->input_size; i++) {
         c->output[i] = c->out_time_buffer[i] / c->input_size;
+    }
+}
+
+static FDL* fdl_malloc_(int block_size, int n_partitions) {
+    const int conv_size = 2 * block_size;
+
+    FDL* fdl = malloc(sizeof(*fdl));
+    if (!fdl)
+        return NULL;
+
+    fdl->block_size = block_size;
+    fdl->n_partitions = n_partitions;
+    fdl->transform_size = block_size * 2;
+
+    fdl->filter = malloc(fdl->n_partitions * sizeof(*fdl->filter));
+    if (!fdl->filter)
+        goto err_free_fdl;
+
+    fdl->delayed_signals = malloc(fdl->n_partitions * sizeof(*fdl->delayed_signals));
+    if (!fdl->delayed_signals)
+        goto err_free_filter;
+
+    for (int i = 0; i < fdl->n_partitions; i++) {
+        fdl->filter[i] = fftwf_malloc((conv_size / 2 + 1) * sizeof(*fdl->filter[i]));
+        fdl->delayed_signals[i] = fftwf_malloc((conv_size / 2 + 1) * sizeof(*fdl->delayed_signals[i]));
+
+        if (!fdl->filter[i] || !fdl->delayed_signals[i]) {
+            for (int j = 0; j < i; j++) {
+                if (fdl->filter[j]) fftwf_free(fdl->filter[j]);
+                if (fdl->delayed_signals[j]) fftwf_free(fdl->delayed_signals[j]);
+            }
+            goto err_free_delayed_signals;
+        }
+    }
+
+    fdl->fft_time_buffer = malloc(conv_size * sizeof(*fdl->fft_time_buffer));
+    fdl->fft_freq_buffer = fftwf_malloc((conv_size / 2 + 1) * sizeof(*fdl->fft_freq_buffer));
+    fdl->ifft_freq_buffer = fftwf_malloc((conv_size / 2 + 1) * sizeof(*fdl->ifft_freq_buffer));
+    fdl->ifft_time_buffer = malloc(conv_size * sizeof(*fdl->ifft_time_buffer));
+
+    fdl->out_buffer = malloc(block_size * sizeof(*fdl->out_buffer));
+
+    return fdl;
+
+err_free_delayed_signals:
+    free(fdl->delayed_signals);
+
+err_free_filter:
+    free(fdl->filter);
+
+err_free_fdl:
+    free(fdl);
+    return NULL;
+}
+
+FDL* conv_init_fdl(int block_size, int n_partitions, float** filter_parts) {
+    FDL* fdl = fdl_malloc_(block_size, n_partitions);
+    if (!fdl) {
+        return NULL;
+    }
+
+    const int transform_size = 2 * fdl->block_size;
+
+    fdl->fft_plan = fftwf_plan_dft_r2c_1d(transform_size, fdl->fft_time_buffer, fdl->fft_freq_buffer, FFTW_MEASURE);
+    fdl->ifft_plan = fftwf_plan_dft_c2r_1d(transform_size, fdl->ifft_freq_buffer, fdl->ifft_time_buffer, FFTW_MEASURE);
+
+    // Copy filter frequency responses to each partition
+    for (int i = 0; i < n_partitions; i++) {
+        memcpy(fdl->fft_time_buffer, filter_parts[i], block_size * sizeof(*filter_parts[0]));
+        memset(fdl->fft_time_buffer + block_size, 0, block_size * sizeof(*filter_parts[0]));
+        fftwf_execute(fdl->fft_plan);
+        memcpy(fdl->filter[i], fdl->fft_freq_buffer, (transform_size / 2 + 1) * sizeof(*fdl->fft_freq_buffer));
+    }
+
+    memset(fdl->fft_time_buffer, 0, fdl->transform_size * sizeof(fdl->fft_time_buffer[0]));
+
+    return fdl;
+}
+
+void conv_terminate_fdl(FDL* fdl) {
+    if (fdl) {
+        for (int i = 0; i < fdl->n_partitions; i++) {
+            fftwf_free(fdl->filter[i]);
+            fftwf_free(fdl->delayed_signals[i]);
+        }
+        free(fdl->filter);
+        free(fdl->fft_time_buffer);
+        fftwf_free(fdl->fft_freq_buffer);
+        free(fdl->ifft_time_buffer);
+        fftwf_free(fdl->ifft_freq_buffer);
+        free(fdl->out_buffer);
+        fftwf_destroy_plan(fdl->fft_plan);
+        fftwf_destroy_plan(fdl->ifft_plan);
+    }
+}
+
+void conv_fdl_process(float* input, FDL* fdl) {
+    /* 
+     * Shift previous input before copying the new one. We can't use more 
+     * efficient data structures, since we need to pass it to FFTW.
+     */
+    memmove(fdl->fft_time_buffer, fdl->fft_time_buffer + fdl->block_size, fdl->block_size * sizeof(fdl->fft_time_buffer[0]));
+    memcpy(fdl->fft_time_buffer + fdl->block_size, input, fdl->block_size * sizeof(fdl->fft_time_buffer[0]));
+
+    fftwf_execute(fdl->fft_plan);
+
+    for (int i = fdl->n_partitions - 1; i > 0; i--) {
+        memcpy(fdl->delayed_signals[i], fdl->delayed_signals[i - 1], (fdl->transform_size / 2 + 1) * sizeof(*fdl->delayed_signals[0]));
+    }
+    memcpy(fdl->delayed_signals[0], fdl->fft_freq_buffer, (fdl->transform_size / 2 + 1) * sizeof(*fdl->delayed_signals[0]));
+
+    // We use the IFFT input buffer to accumulate the complex multiply results
+    for (int i = 0; i < (fdl->transform_size / 2 + 1); i++) {
+        fdl->ifft_freq_buffer[i][0] = 0;
+        fdl->ifft_freq_buffer[i][1] = 0;
+    }
+
+    for (int i = 0; i < fdl->n_partitions; i++) {
+        for (int j = 0; j < (fdl->transform_size / 2 + 1); j++) {
+            fftwf_complex result;
+            complex_multiply(result, fdl->delayed_signals[i][j], fdl->filter[i][j]);
+            fdl->ifft_freq_buffer[j][0] += result[0];
+            fdl->ifft_freq_buffer[j][1] += result[1];
+        }
+    }
+
+    fftwf_execute(fdl->ifft_plan);
+
+    // We divide by the transform size here, since the IFFT result is not normalized
+    for (int i = 0; i < fdl->block_size; i++) {
+        fdl->out_buffer[i] = fdl->ifft_time_buffer[fdl->block_size + i] / fdl->transform_size;
     }
 }
