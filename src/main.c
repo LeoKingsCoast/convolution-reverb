@@ -18,15 +18,19 @@
 #include <sys/mman.h>
 #include <pa_linux_alsa.h>
 
-#define IMPULSE_RESP_SIZE 1024
-#define FRAMES_PER_BUFFER 1024
+#define IMPULSE_RESP_SIZE 8192
+#define BLOCK_SIZE 512
+#define FRAMES_PER_BUFFER BLOCK_SIZE
 #define SAMPLE_RATE 44100
 
+// Compute the ceiling of x/y. Positive integers only.
+#define divide_ceil(x, y) (x % y == 0 ? (x / y) : (1 + x / y))
+
 typedef struct user_data {
-    ConvolutorCircular* convolutor;
     float* overlap_buffer;
     int impulse_resp_size;
     RingBuffer* ring_buffer;
+    FDL* fdl;
 } UserData;
 
 static int callback(
@@ -39,7 +43,7 @@ static int callback(
     float* out = (float*) out_buffer;
     UserData* params = (UserData*) user_data;
 
-    ConvolutorCircular* conv = params->convolutor;
+    FDL* fdl = params->fdl;
     RingBuffer* ring_buffer = params->ring_buffer;
     float* overlap_buffer = params->overlap_buffer;
     int impulse_resp_size = params->impulse_resp_size;
@@ -47,13 +51,10 @@ static int callback(
     if (!in || !out)
         return paContinue;
 
-    memcpy(conv->input, overlap_buffer, (impulse_resp_size - 1) * sizeof(float));
-    memcpy(conv->input + (impulse_resp_size - 1), in, frames_per_buffer * sizeof(float));
-
-    conv_circular(conv);
+    conv_fdl_process(in, fdl);
 
     for (int i = 0; i < frames_per_buffer; i++) {
-        float sample = conv->output[impulse_resp_size - 1 + i];
+        float sample = fdl->out_buffer[i];
         ring_buffer_push(ring_buffer, sample);
         *out++ = sample; // left side
         *out++ = sample; // right side
@@ -110,11 +111,56 @@ void fill_impulse_response_reverb(float *ir, int ir_len, float decay_ms, float s
     }
 }
 
+/**
+ * @brief Partition an input signal into a uniformly-partitioned output. Takes
+ * in the input signal and a block size. Divides the signal in `n_partitions`
+ * partitions of size `block_size`, where `n_partitions` is the next integer
+ * >= `in_size / block_size`. The output signal is padded with 0 if the partitions
+ * do not fit with the block size
+ *
+ * @param in Input signal
+ * @param in_size Number of elements in the input signal
+ * @param block_size Desired block size for each partition of the output
+ * @param[out] n_partitions Number of partitions generated
+ * @return Uniformly-partitioned output signal
+ */
+float** get_partitioned_signal(float* in, int in_size, int block_size, int *n_partitions) {
+    *n_partitions = divide_ceil(in_size, block_size);
+    float** out = malloc(*n_partitions * sizeof(*out));
+    if (!out)
+        return NULL;
+    for (int i = 0; i < *n_partitions; i++) {
+        out[i] = malloc(block_size * sizeof(*out[i]));
+        if (!out[i]){
+            for (int j = 0; j < i; j++)
+                if (out[j]) free(out[j]);
+            free(out);
+            return NULL;
+        }
+    }
+
+    for (int i = 0; i < in_size; i++) {
+        out[i / block_size][i % block_size] = i < in_size
+            ? in[i]
+            : 0;
+    }
+
+    return out;
+}
+
+void free_partitioned_signal(float** sig, int n_partitions) {
+    if (sig){
+        for (int i = 0; i < n_partitions; i++)
+            free(sig[i]);
+        free(sig);
+    }
+}
+
 int main() {
     // ================= LOCK MEMORY ==================
 
     if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
-        perror("Failed to lock memory");
+        perror("Failed to lock memory with mlockall");
         return -1;
     }
 
@@ -123,7 +169,10 @@ int main() {
 
     float impulse_resp[IMPULSE_RESP_SIZE];
 
-    fill_impulse_response_reverb(impulse_resp, IMPULSE_RESP_SIZE, 20.0, SAMPLE_RATE);
+    fill_impulse_response_reverb(impulse_resp, IMPULSE_RESP_SIZE, 160.0, SAMPLE_RATE);
+
+    int n_partitions; // Number of impulse response partitions
+    float **partitioned_impulse_resp = get_partitioned_signal(impulse_resp, IMPULSE_RESP_SIZE, BLOCK_SIZE, &n_partitions);
 
     // =========== CREATE FILE WRITE THREAD ===========
 
@@ -157,10 +206,10 @@ int main() {
     // ================ START STREAM ==================
 
     UserData user_data = {
-        .convolutor = conv_init_circular(FRAMES_PER_BUFFER + IMPULSE_RESP_SIZE - 1, IMPULSE_RESP_SIZE, impulse_resp),
         .overlap_buffer = calloc((IMPULSE_RESP_SIZE - 1), sizeof(float)),
         .impulse_resp_size = IMPULSE_RESP_SIZE,
         .ring_buffer = ring_buffer,
+        .fdl = conv_init_fdl(BLOCK_SIZE, n_partitions, partitioned_impulse_resp),
     };
 
     PaStream* stream = portaudio_init( SAMPLE_RATE, paFloat32, FRAMES_PER_BUFFER, callback, &user_data);
@@ -186,7 +235,7 @@ int main() {
     sf_close(outfile);
 
     free(user_data.overlap_buffer);
-    conv_terminate_circular(user_data.convolutor);
+    conv_terminate_fdl(user_data.fdl);
 
     Pa_CloseStream(stream);
     if (err != paNoError) {
@@ -194,6 +243,8 @@ int main() {
         return -1;
     }
     Pa_Terminate();
+
+    free_partitioned_signal(partitioned_impulse_resp, n_partitions);
 
     return 0;
 }

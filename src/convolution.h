@@ -110,7 +110,7 @@ void conv_circular(ConvolutorCircular* c);
  *
  * @param[out] fdl->output Convolution result buffer, with block_size elements
  */
-void conv_fdl_process(float* input, FDL* fdl);
+void conv_fdl_process(const float* input, FDL* fdl);
 
 /**
  * @brief Terminates the convolutor object.

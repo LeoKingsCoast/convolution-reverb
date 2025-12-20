@@ -337,7 +337,7 @@ void conv_terminate_fdl(FDL* fdl) {
     }
 }
 
-void conv_fdl_process(float* input, FDL* fdl) {
+void conv_fdl_process(const float* input, FDL* fdl) {
     /* 
      * Shift previous input before copying the new one. We can't use more 
      * efficient data structures, since we need to pass it to FFTW.
